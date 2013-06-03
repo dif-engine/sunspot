@@ -18,4 +18,12 @@ cabal-version:       >=1.8
 library
   -- exposed-modules:     
   -- other-modules:       
-  build-depends:       base ==4.6.*
+  build-depends:     base ==4.6.*
+
+
+executable main
+  main-is:           main.hs
+  hs-source-dirs:    exe-src/
+  Ghc-Options:       -O2 -Wall
+  build-depends:     base ==4.6.*
+
