@@ -1,4 +1,4 @@
-all: build doc
+all: build # doc
 
 .PHONY: init build doc test
 
