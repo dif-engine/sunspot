@@ -34,3 +34,15 @@ executable main
                    , system-filepath
                    , transformers
                    , vector
+
+
+executable shrink
+  main-is:           shrink.hs
+  hs-source-dirs:    exe-src/
+  Ghc-Options:       -O2 -Wall -threaded -rtsopts
+  build-depends:     base ==4.6.*
+                   , imagemagick
+                   , MissingH
+                   , process
+                   , system-filepath
+                   , transformers
