@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 module Main where
@@ -27,8 +28,9 @@ import           Filesystem.Path.CurrentOS (decodeString)
 import           GHC.Float (double2Float)
 import           Graphics.ImageMagick.MagickWand
 import           System.Environment
-import           System.Process
 import           System.IO
+import           System.Process
+import           System.Random
 import           Text.Printf
 
 
@@ -187,15 +189,20 @@ process (imageFn, maskFn) = do
   maxTree <- computeQuadTree (foldr1 (zipRGBAWith max)) pictSun
 
   
-  featureBulk <- forM [0,3..h-1] $ \y -> do
-    forM [0,3..w-1] $ \x -> do
+  featureBulk <- forM [0, 2 .. h-1] $ \y -> do
+    forM [0, 2 .. w-1] $ \x -> do
       let pt = ix2 x y
           classNum = Repa.index classedSun pt
           fvec0 = map (^.red) $ traverseQuadTree pt avgTree
 
           featureStr :: String
           featureStr = unwords $ zipWith (printf "%d:%f") [(1::Int)..] $ fvec0
-                       
-      return $ Text.pack $ printf "%d %s\n" classNum featureStr
+
+      sparser <- randomRIO (0,29 :: Int)
+      let outputFlag = if classNum==0 then sparser==0 else True
+      
+      return $ case outputFlag of
+        False -> ""
+        True  -> Text.pack $ printf "%d %s\n" classNum featureStr
   Text.writeFile featureFn $ Text.concat $ concat featureBulk
   
