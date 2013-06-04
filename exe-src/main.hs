@@ -2,6 +2,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 module Main where
 
@@ -13,7 +15,7 @@ import           Control.Monad
 import           Control.Monad.IO.Class (liftIO, MonadIO)
 import qualified Data.Array.Repa as Repa
 import qualified Data.Array.Repa.Eval as Repa
-import           Data.Array.Repa.Index (ix2, DIM2)
+import           Data.Array.Repa.Index 
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Generic.Mutable as VGM
 import qualified Data.Vector.Unboxed as VU
@@ -77,6 +79,25 @@ type Picture a = Repa.Array Repa.U DIM2 a
 type ColorPicture = Picture (RGBA Float)
 
 
+computeQuadTree :: forall a. (VUM.Unbox a) => 
+                  ([a] -> a) ->
+                  Picture a -> IO [Picture a]
+computeQuadTree reduction pict = do
+  let (Z :. w0 :. h0) =  Repa.extent pict
+  if | w0 <= 1 -> return [pict]
+     | h0 <= 1 -> return [pict]
+     | otherwise -> do
+       let w = w0 `div` 2; h = h0 `div` 2
+           at :: Int -> Int -> a
+           at x y = Repa.unsafeIndex pict (ix2 x y)
+
+           gen :: DIM2 -> a
+           gen (Z :. x :. y) = reduction $
+             at <$> [2*x, 2*x+1] <*> [2*y, 2*y+1]
+       nextPict <- Repa.computeP $ Repa.fromFunction
+         (ix2 w h) gen
+       fmap (pict:) $ computeQuadTree reduction nextPict
+
 
 data SunspotClass = NotSunspot | SunspotA | SunspotB | SunspotBG | SunspotBGD
   deriving (Eq, Ord, Show, Enum)
@@ -137,4 +158,8 @@ main = do
     forM_ [0..4] $ \classIdx -> do
       cnt <- Repa.foldAllP (+) (0::Int) $ Repa.map (\i -> if i==classIdx then 1 else 0) classedSun
       printf "class %d: %08d\n" classIdx cnt
-    return ()
+
+    tree <- computeQuadTree (fmap (/4) . sum) pictSun
+    
+    print $ map Repa.extent tree
+
