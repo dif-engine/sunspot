@@ -141,7 +141,7 @@ data SunspotClass = NotSunspot | SunspotA | SunspotB | SunspotBG | SunspotBGD
 sscOf :: (Fractional a, Ord a) => Lens.Iso' (RGBA a) SunspotClass
 sscOf = Lens.iso to fro 
   where
-    to (RGBA (r,g,b,a))
+    to (RGBA (r,g,b,_))
        | r <  0.5 && g <  0.5 && b >= 0.5 = SunspotA
        | r <  0.5 && g >= 0.5 && b <  0.5 = SunspotB
        | r >= 0.5 && g >= 0.5 && b <  0.5 = SunspotBG
@@ -228,7 +228,7 @@ process (imageFn, maskFn) = do
                   else []
 
           featureStr :: String
-          featureStr = unwords $ zipWith (printf "%d:%f") [(1::Int)..] $ fvec0
+          featureStr = unwords $ zipWith (printf "%d:%f") [(1::Int)..] $ fvec0++fvec1
 
       sparser <- randomRIO (0,29 :: Int)
       let outputFlag = if classNum==0 then sparser==0 else True
