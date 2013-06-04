@@ -1,20 +1,17 @@
 module Main where
 
-import Control.Applicative
-import Control.DeepSeq (NFData)
-import Control.Monad
-import Control.Monad.IO.Class (liftIO, MonadIO)
-import qualified Data.IORef.Strict as SIO
-import Data.IORef
-import Filesystem.Path.CurrentOS
-import Graphics.ImageMagick.MagickWand
-import qualified System.IO.Strict as SIO
-import qualified System.IO.Strict.Internals as SIO
-import System.Environment
-import Text.Printf
+import           Control.Applicative
+import           Control.Monad
+import           Control.Monad.IO.Class (liftIO, MonadIO)
+import           Data.IORef
+import qualified Data.Array.Repa as Repa
+import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector.Unboxed.Mutable as VUM
+import           Filesystem.Path.CurrentOS (decodeString)
+import           Graphics.ImageMagick.MagickWand
+import           System.Environment
+import           Text.Printf
 
-liftSIO :: (MonadIO m, NFData a) => SIO.SIO a -> m a
-liftSIO = liftIO . SIO.run
 
 main = do
   [fn] <- getArgs
@@ -25,24 +22,19 @@ main = do
     h <- getImageWidth img
     liftIO $ printf "(%d, %d)\n" w h
 
-    sioCtrRef <- liftIO $ newIORef undefined
+
 
     pxl <- pixelWand
-    liftSIO $ do
-      sioCtr <- SIO.newIORef (0 :: Double)
-      SIO.wrap0 $ writeIORef sioCtrRef sioCtr
-      return ()
+    pixels <- liftIO $ VUM.replicate (h*w) (0::Double)
 
-    sioCtr <- liftIO $ readIORef sioCtrRef
-
-    forM_ [0..h-1] $ \y-> do
-      forM_ [0..w-1] $ \x-> do
-        getImagePixelColor img x y pxl
-        r <- getRed pxl
-        liftSIO $ SIO.modifyIORef sioCtr (r+)
-
-    liftSIO $ do
-      sum <- SIO.readIORef sioCtr
-      SIO.wrap0 $ print sum
+    forM_ [0..(h*w-1)] $ \idx -> do
+       let (y,x) = idx `divMod` w
+       getImagePixelColor img x y pxl
+       r <- getRed pxl
+       g <- getGreen pxl
+       b <- getBlue pxl
+       liftIO $ VUM.write pixels idx $ (r+g+b)/3
+ 
+    liftIO $ print $ VUM.length pixels
 
     return ()

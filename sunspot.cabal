@@ -24,10 +24,12 @@ library
 executable main
   main-is:           main.hs
   hs-source-dirs:    exe-src/
-  Ghc-Options:       -O2 -Wall
+  Ghc-Options:       -O2 -Wall -threaded
   build-depends:     base ==4.6.*
                    , deepseq
                    , imagemagick
+                   , repa
                    , strict-io
                    , system-filepath
                    , transformers
+                   , vector
