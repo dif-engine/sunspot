@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
@@ -17,6 +18,7 @@ import           Control.Monad.IO.Class (liftIO, MonadIO)
 import qualified Data.Array.Repa as Repa
 import qualified Data.Array.Repa.Eval as Repa
 import           Data.Array.Repa.Index 
+import           Data.Data
 import           Data.String.Utils (replace)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
@@ -27,13 +29,25 @@ import qualified Data.Vector.Unboxed.Mutable as VUM
 import           Filesystem.Path.CurrentOS (decodeString)
 import           GHC.Float (double2Float)
 import           Graphics.ImageMagick.MagickWand
+import           System.Console.CmdArgs.Implicit ((&=))
+import qualified System.Console.CmdArgs.Implicit as Cmd
 import           System.Environment
 import           System.IO
+import           System.IO.Unsafe
 import           System.Process
 import           System.Random
 import           Text.Printf
 
 
+data Option = Option { useMinMax :: Bool, patternSize :: Int, outputFolder :: String}
+  deriving (Eq, Show, Typeable, Data)
+
+optionParser :: Option
+optionParser = Option Cmd.def Cmd.def Cmd.def
+
+{-# NOINLINE myOption #-}
+myOption :: Option
+myOption = unsafePerformIO $ Cmd.cmdArgs optionParser
 
 
 newtype RGBA a = RGBA {unRGBA :: (a,a,a,a)} deriving (Eq, Show, Functor)
@@ -85,31 +99,40 @@ type Picture a = Repa.Array Repa.U DIM2 a
 type ColorPicture = Picture (RGBA Float)
 
 
-computeQuadTree :: forall a. (VUM.Unbox a) => 
+at :: (VUM.Unbox a, Num a) => Picture a -> DIM2 -> a
+at pict pt@(Z :. x :. y)
+  | x <  0    = 0
+  | y <  0    = 0
+  | x >= w    = 0
+  | y >= h    = 0
+  | otherwise = Repa.unsafeIndex pict pt
+  where
+    (Z :. w :. h) =  Repa.extent pict
+
+computeQuadTree :: forall a. (VUM.Unbox a, Num a) => 
                   ([a] -> a) ->
                   Picture a -> IO [Picture a]
 computeQuadTree reduction pict = do
   let (Z :. w0 :. h0) =  Repa.extent pict
-  if | w0 <= 1 -> return [pict]
-     | h0 <= 1 -> return [pict]
+  if | w0 <= 8 -> return [pict]
+     | h0 <= 8 -> return [pict]
      | otherwise -> do
        let w = w0 `div` 2; h = h0 `div` 2
-           at :: Int -> Int -> a
-           at x y = Repa.unsafeIndex pict (ix2 x y)
-
            gen :: DIM2 -> a
-           gen (Z :. x :. y) = reduction $
-             at <$> [2*x, 2*x+1] <*> [2*y, 2*y+1]
+           gen (Z :. x :. y) = reduction $ map (at pict) $
+             ix2 <$> [2*x, 2*x+1] <*> [2*y, 2*y+1]
        nextPict <- Repa.computeP $ Repa.fromFunction
          (ix2 w h) gen
        fmap (pict:) $ computeQuadTree reduction nextPict
 
-traverseQuadTree :: (VUM.Unbox a) => DIM2 -> [Picture a] -> [a]
+traverseQuadTree :: (VUM.Unbox a, Num a) => DIM2 -> [Picture a] -> [a]
 traverseQuadTree pt@(Z :. x :. y) pics = case pics of
   [] -> []
   (pic:restOfPics) -> 
-    Repa.index pic pt : traverseQuadTree (ix2 (x`div`2) (y`div`2)) restOfPics
-                                  
+    map (at pic) pts ++ traverseQuadTree (ix2 (x`div`2) (y`div`2)) restOfPics
+      where
+        pts = [ix2 x' y' | y' <- [y-n .. y+n], x' <- [x-n .. x+n]]
+        n = patternSize myOption                           
 
 
 data SunspotClass = NotSunspot | SunspotA | SunspotB | SunspotBG | SunspotBGD
@@ -164,7 +187,8 @@ inputFns = [ ("20120123_hmi.png","20120123_hmi_mask.png")
 
 main :: IO ()
 main = do
-  _ <- system "mkdir -p feature"
+  print myOption
+  _ <- system $ "mkdir -p " ++ outputFolder myOption
   mapM_ process inputFns
   
 
@@ -172,7 +196,7 @@ process :: (String,String) -> IO ()
 process (imageFn, maskFn) = do
   pictSun <- loadColorPicture $ "data-shrunk/" ++ imageFn
   let (Z :. w :. h) = Repa.extent pictSun
-      featureFn = "feature/" ++ replace ".png" ".txt" imageFn
+      featureFn = outputFolder myOption ++ "/" ++ replace ".png" ".txt" imageFn
   pictMask <- loadColorPicture $ "data-shrunk/" ++ maskFn
 
 
@@ -193,7 +217,15 @@ process (imageFn, maskFn) = do
     forM [0, 2 .. w-1] $ \x -> do
       let pt = ix2 x y
           classNum = Repa.index classedSun pt
-          fvec0 = map (^.red) $ traverseQuadTree pt avgTree
+          
+          useTree :: [ColorPicture] -> [Float]
+          useTree = map (^.red) . traverseQuadTree pt 
+
+          fvec0 = useTree avgTree
+
+          fvec1 = if useMinMax myOption 
+                  then useTree minTree ++ useTree maxTree
+                  else []
 
           featureStr :: String
           featureStr = unwords $ zipWith (printf "%d:%f") [(1::Int)..] $ fvec0
