@@ -196,6 +196,6 @@ process (imageFn, maskFn) = do
           featureStr :: String
           featureStr = unwords $ zipWith (printf "%d:%f") [(1::Int)..] $ fvec0
                        
-      return $ Text.pack $ printf "%d %s\n" (classNum+1) featureStr
+      return $ Text.pack $ printf "%d %s\n" classNum featureStr
   Text.writeFile featureFn $ Text.concat $ concat featureBulk
   
