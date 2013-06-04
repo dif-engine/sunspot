@@ -98,6 +98,13 @@ computeQuadTree reduction pict = do
          (ix2 w h) gen
        fmap (pict:) $ computeQuadTree reduction nextPict
 
+traverseQuadTree :: (VUM.Unbox a) => DIM2 -> [Picture a] -> [a]
+traverseQuadTree pt@(Z :. x :. y) pics = case pics of
+  [] -> []
+  (pic:restOfPics) -> 
+    Repa.index pic pt : traverseQuadTree (ix2 (x`div`2) (y`div`2)) restOfPics
+                                  
+
 
 data SunspotClass = NotSunspot | SunspotA | SunspotB | SunspotBG | SunspotBGD
   deriving (Eq, Ord, Show, Enum)
@@ -159,7 +166,15 @@ main = do
       cnt <- Repa.foldAllP (+) (0::Int) $ Repa.map (\i -> if i==classIdx then 1 else 0) classedSun
       printf "class %d: %08d\n" classIdx cnt
 
-    tree <- computeQuadTree (fmap (/4) . sum) pictSun
-    
-    print $ map Repa.extent tree
+    avgTree <- computeQuadTree (fmap (/4) . sum) pictSun
+    minTree <- computeQuadTree (foldr1 (zipRGBAWith min)) pictSun
+    maxTree <- computeQuadTree (foldr1 (zipRGBAWith max)) pictSun
+    print $ traverseQuadTree (ix2 256 256) minTree
+    print $ traverseQuadTree (ix2 256 256) maxTree
+    print $ traverseQuadTree (ix2 0 0) maxTree
+    print $ traverseQuadTree (ix2 511 511) maxTree
+    print $ traverseQuadTree (ix2 256 256) avgTree
+    print $ traverseQuadTree (ix2 260 260) avgTree
+  
+--    print $ map Repa.extent tree
 
