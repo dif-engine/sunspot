@@ -5,6 +5,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 module Main where
@@ -39,11 +40,14 @@ import           System.Random
 import           Text.Printf
 
 
-data Option = Option { useMinMax :: Bool, patternSize :: Int, outputFolder :: String}
+data Option = Option { useMinMax :: Bool, patternSize :: Int}
   deriving (Eq, Show, Typeable, Data)
 
 optionParser :: Option
-optionParser = Option Cmd.def Cmd.def Cmd.def
+optionParser = Option Cmd.def Cmd.def 
+
+outputFolder :: Option -> String
+outputFolder Option{..} = printf "result-%d-%d" (if useMinMax then 1 else 0::Int) patternSize
 
 {-# NOINLINE myOption #-}
 myOption :: Option
@@ -185,18 +189,36 @@ inputFns = [ ("20120123_hmi.png","20120123_hmi_mask.png")
            , ("20120307_hmi.png","20120307_hmi_mask.png")
            , ("20130515_11745_hmi.png","20130515_11745_hmi_mask.png")]
 
+toFeatureFn :: String -> String
+toFeatureFn fn = outputFolder myOption ++ "/" ++ replace ".png" ".txt" fn
+
 main :: IO ()
 main = do
   print myOption
   _ <- system $ "mkdir -p " ++ outputFolder myOption
   mapM_ process inputFns
   
+  let featureFns = map (toFeatureFn . fst) $init inputFns
+      trainFiles = init featureFns
+      validFiles = [last featureFns]
+
+      trainCatFile  = toFeatureFn "train.txt"
+      validCatFile  = toFeatureFn "validate.txt"
+  
+      logFile = toFeatureFn "libsvm-easy.log"
+
+  _ <- system $ printf "cat %s > %s" (unwords trainFiles) trainCatFile
+  _ <- system $ printf "cat %s > %s" (unwords validFiles) validCatFile
+  _ <- system $ printf "./libsvm/easy.py %s %s &> %s" trainCatFile validCatFile logFile
+
+  return ()
 
 process :: (String,String) -> IO ()
 process (imageFn, maskFn) = do
   pictSun <- loadColorPicture $ "data-shrunk/" ++ imageFn
   let (Z :. w :. h) = Repa.extent pictSun
-      featureFn = outputFolder myOption ++ "/" ++ replace ".png" ".txt" imageFn
+      featureFn = toFeatureFn imageFn
+
   pictMask <- loadColorPicture $ "data-shrunk/" ++ maskFn
 
 
