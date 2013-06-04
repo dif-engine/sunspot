@@ -29,9 +29,12 @@ executable main
                    , deepseq
                    , imagemagick
                    , lens
+                   , MissingH
+                   , process
                    , repa
                    , strict-io
                    , system-filepath
+                   , text
                    , transformers
                    , vector
 

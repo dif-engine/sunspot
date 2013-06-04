@@ -16,6 +16,9 @@ import           Control.Monad.IO.Class (liftIO, MonadIO)
 import qualified Data.Array.Repa as Repa
 import qualified Data.Array.Repa.Eval as Repa
 import           Data.Array.Repa.Index 
+import           Data.String.Utils (replace)
+import qualified Data.Text as Text
+import qualified Data.Text.IO as Text
 import qualified Data.Vector.Generic as VG
 import qualified Data.Vector.Generic.Mutable as VGM
 import qualified Data.Vector.Unboxed as VU
@@ -24,6 +27,7 @@ import           Filesystem.Path.CurrentOS (decodeString)
 import           GHC.Float (double2Float)
 import           Graphics.ImageMagick.MagickWand
 import           System.Environment
+import           System.Process
 import           System.IO
 import           Text.Printf
 
@@ -151,30 +155,47 @@ loadColorPicture fn = withMagickWandGenesis $ do
   return $ Repa.fromUnboxed (ix2 w h) pixelsF
 
 
+inputFns :: [(String,String)]
+inputFns = [ ("20120123_hmi.png","20120123_hmi_mask.png")
+           , ("20120307_hmi.png","20120307_hmi_mask.png")
+           , ("20130515_11745_hmi.png","20130515_11745_hmi_mask.png")]
 
+main :: IO ()
 main = do
-  fns <- getArgs
-
-  forM_ fns $ \fn -> do
-    pictSun <- loadColorPicture fn
+  _ <- system "mkdir -p feature"
+  mapM_ process inputFns
   
-    
-    classedSun <- Repa.computeP $ Repa.map (fromEnum . (^. sscOf)) pictSun
-                  :: IO (Picture Int)
 
-    forM_ [0..4] $ \classIdx -> do
-      cnt <- Repa.foldAllP (+) (0::Int) $ Repa.map (\i -> if i==classIdx then 1 else 0) classedSun
-      printf "class %d: %08d\n" classIdx cnt
+process :: (String,String) -> IO ()
+process (imageFn, maskFn) = do
+  pictSun <- loadColorPicture $ "data-shrunk/" ++ imageFn
+  let (Z :. w :. h) = Repa.extent pictSun
+      featureFn = "feature/" ++ replace ".png" ".txt" imageFn
+  pictMask <- loadColorPicture $ "data-shrunk/" ++ maskFn
 
-    avgTree <- computeQuadTree (fmap (/4) . sum) pictSun
-    minTree <- computeQuadTree (foldr1 (zipRGBAWith min)) pictSun
-    maxTree <- computeQuadTree (foldr1 (zipRGBAWith max)) pictSun
-    print $ traverseQuadTree (ix2 256 256) minTree
-    print $ traverseQuadTree (ix2 256 256) maxTree
-    print $ traverseQuadTree (ix2 0 0) maxTree
-    print $ traverseQuadTree (ix2 511 511) maxTree
-    print $ traverseQuadTree (ix2 256 256) avgTree
-    print $ traverseQuadTree (ix2 260 260) avgTree
+
+
+  classedSun <- Repa.computeP $ Repa.map (fromEnum . (^. sscOf)) pictMask
+                :: IO (Picture Int)
+
+  forM_ [0..4] $ \classIdx -> do
+    cnt <- Repa.foldAllP (+) (0::Int) $ Repa.map (\i -> if i==classIdx then 1 else 0) classedSun
+    printf "class %d: %08d\n" classIdx cnt
+
+  avgTree <- computeQuadTree (fmap (/4) . sum) pictSun
+  minTree <- computeQuadTree (foldr1 (zipRGBAWith min)) pictSun
+  maxTree <- computeQuadTree (foldr1 (zipRGBAWith max)) pictSun
+
   
---    print $ map Repa.extent tree
+  featureBulk <- forM [0,3..h-1] $ \y -> do
+    forM [0,3..w-1] $ \x -> do
+      let pt = ix2 x y
+          classNum = Repa.index classedSun pt
+          fvec0 = map (^.red) $ traverseQuadTree pt avgTree
 
+          featureStr :: String
+          featureStr = unwords $ zipWith (printf "%d:%f") [(1::Int)..] $ fvec0
+                       
+      return $ Text.pack $ printf "%d %s\n" (classNum+1) featureStr
+  Text.writeFile featureFn $ Text.concat $ concat featureBulk
+  
