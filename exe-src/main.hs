@@ -35,9 +35,8 @@ main = do
 
     sioCtr <- liftIO $ readIORef sioCtrRef
 
-    forM_ [0..w-1] $ \x-> do
-      forM_ [0..h-1] $ \y-> do
-
+    forM_ [0..h-1] $ \y-> do
+      forM_ [0..w-1] $ \x-> do
         getImagePixelColor img x y pxl
         r <- getRed pxl
         liftSIO $ SIO.modifyIORef sioCtr (r+)
