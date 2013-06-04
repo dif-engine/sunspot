@@ -27,6 +27,7 @@ import           Text.Printf
 
 
 
+
 newtype RGBA a = RGBA {unRGBA :: (a,a,a,a)} deriving (Eq, Show, Functor)
 deriving instance (VG.Vector VU.Vector a, VUM.Unbox a) => VG.Vector VU.Vector (RGBA a)
 deriving instance (VGM.MVector VU.MVector a, VUM.Unbox a) => VGM.MVector VU.MVector (RGBA a)
@@ -72,10 +73,33 @@ instance (NFData a, Num a) => Num (RGBA a) where
   abs = error "cannot abs"
   signum = error "cannot sig"
 
-type Image = Repa.Array Repa.U DIM2 (RGBA Float)
+type Picture a = Repa.Array Repa.U DIM2 a
+type ColorPicture = Picture (RGBA Float)
 
-loadImage :: FilePath -> IO Image
-loadImage fn = withMagickWandGenesis $ do
+
+
+data SunspotClass = NotSunspot | SunspotA | SunspotB | SunspotBG | SunspotBGD
+  deriving (Eq, Ord, Show, Enum)
+
+sscOf :: (Fractional a, Ord a) => Lens.Iso' (RGBA a) SunspotClass
+sscOf = Lens.iso to fro 
+  where
+    to (RGBA (r,g,b,a))
+       | r <  0.5 && g <  0.5 && b >= 0.5 = SunspotA
+       | r <  0.5 && g >= 0.5 && b <  0.5 = SunspotB
+       | r >= 0.5 && g >= 0.5 && b <  0.5 = SunspotBG
+       | r >= 0.5 && g <  0.5 && b <  0.5 = SunspotBGD
+       | otherwise                        = NotSunspot
+    fro NotSunspot = rgba 1 1 1 1
+    fro SunspotA   = rgba 0 0 1 1
+    fro SunspotB   = rgba 0 1 0 1
+    fro SunspotBG  = rgba 1 1 0 1
+    fro SunspotBGD = rgba 1 0 0 1
+    
+
+
+loadColorPicture :: FilePath -> IO ColorPicture
+loadColorPicture fn = withMagickWandGenesis $ do
   (_,img) <- magickWand
   readImage img $ decodeString fn
   w <- getImageWidth img
@@ -104,9 +128,13 @@ main = do
   fns <- getArgs
 
   forM_ fns $ \fn -> do
-    repaSun <- loadImage fn
+    pictSun <- loadColorPicture fn
   
-    nume <- Repa.foldAllP (+) 0 repaSun
-    deno <- Repa.foldAllP (+) 0 $ Repa.map (const (1::Float)) repaSun
-    printf "%s %s" (show nume) (show deno)
+    
+    classedSun <- Repa.computeP $ Repa.map (fromEnum . (^. sscOf)) pictSun
+                  :: IO (Picture Int)
+
+    forM_ [0..4] $ \classIdx -> do
+      cnt <- Repa.foldAllP (+) (0::Int) $ Repa.map (\i -> if i==classIdx then 1 else 0) classedSun
+      printf "class %d: %08d\n" classIdx cnt
     return ()
