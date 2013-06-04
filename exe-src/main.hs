@@ -19,6 +19,7 @@ import qualified Data.Vector.Generic.Mutable as VGM
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import           Filesystem.Path.CurrentOS (decodeString)
+import           GHC.Float (double2Float)
 import           Graphics.ImageMagick.MagickWand
 import           System.Environment
 import           System.IO
@@ -71,7 +72,7 @@ instance (NFData a, Num a) => Num (RGBA a) where
   abs = error "cannot abs"
   signum = error "cannot sig"
 
-type Image = Repa.Array Repa.U DIM2 (RGBA Double)
+type Image = Repa.Array Repa.U DIM2 (RGBA Float)
 
 loadImage :: FilePath -> IO Image
 loadImage fn = withMagickWandGenesis $ do
@@ -91,7 +92,7 @@ loadImage fn = withMagickWandGenesis $ do
      g0 <- getGreen pxl
      b0 <- getBlue pxl
      a0 <- getAlpha pxl
-     liftIO $ VUM.write pixels idx $ rgba r0 g0 b0 a0
+     liftIO $ VUM.write pixels idx $ fmap double2Float $ rgba r0 g0 b0 a0
 
   pixelsF <- liftIO $ VU.freeze pixels
 
@@ -100,11 +101,12 @@ loadImage fn = withMagickWandGenesis $ do
 
 
 main = do
-  [fn] <- getArgs
+  fns <- getArgs
 
-  repaSun <- loadImage fn
-
-  nume <- Repa.foldAllP (+) 0 repaSun
-  deno <- Repa.foldAllP (+) 0 $ Repa.map (const (1::Double)) repaSun
-  printf "%s %s" (show nume) (show deno)
-  return ()
+  forM_ fns $ \fn -> do
+    repaSun <- loadImage fn
+  
+    nume <- Repa.foldAllP (+) 0 repaSun
+    deno <- Repa.foldAllP (+) 0 $ Repa.map (const (1::Float)) repaSun
+    printf "%s %s" (show nume) (show deno)
+    return ()
