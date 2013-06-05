@@ -202,20 +202,22 @@ main :: IO ()
 main = do
   print myOption
   _ <- system $ "mkdir -p " ++ outputFolder myOption
+  _ <- system $ printf "ln -s $PWD/libsvm %s/ "  (outputFolder myOption)
   mapM_ process inputFns
   
   let featureFns = map (toFeatureFn . fst) $init inputFns
       trainFiles = init featureFns
       validFiles = [last featureFns]
 
-      trainCatFile  = toFeatureFn "train.txt"
-      validCatFile  = toFeatureFn "validate.txt"
+      trainCatFile  = "train.txt"
+      validCatFile  = "validate.txt"
   
       logFile = toFeatureFn "libsvm-easy.log"
 
-  _ <- system $ printf "cat %s > %s" (unwords trainFiles) trainCatFile
-  _ <- system $ printf "cat %s > %s" (unwords validFiles) validCatFile
-  ret <- readInteractiveCommand$ printf "./libsvm/easy.py %s %s" trainCatFile validCatFile 
+  _ <- system $ printf "cat %s > %s" (unwords trainFiles) (toFeatureFn trainCatFile)
+  _ <- system $ printf "cat %s > %s" (unwords validFiles) (toFeatureFn validCatFile)
+  ret <- readInteractiveCommand$ printf "cd %s; ./libsvm/easy.py %s %s" 
+         (outputFolder myOption) trainCatFile validCatFile 
   writeFile logFile ret
 
   return ()
