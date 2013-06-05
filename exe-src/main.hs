@@ -30,13 +30,14 @@ import qualified Data.Vector.Generic.Mutable as VGM
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as VUM
 import           Filesystem.Path.CurrentOS (decodeString)
-import           GHC.Float (double2Float)
+import           GHC.Float (double2Float, float2Double)
 import           Graphics.ImageMagick.MagickWand
 import           System.Console.CmdArgs.Implicit ((&=))
 import qualified System.Console.CmdArgs.Implicit as Cmd
 import           System.Directory(setCurrentDirectory)
 import           System.Environment
 import           System.IO
+import qualified System.IO.Strict as Strict
 import           System.IO.Unsafe
 import           System.Process
 import           System.Random
@@ -45,6 +46,7 @@ import           Text.Printf
 
 readInteractiveCommand :: String -> IO String
 readInteractiveCommand cmd = do
+  hPutStrLn stderr cmd                       
   (_, stdout, _, _) <- runInteractiveCommand cmd
   hGetContents stdout
 
@@ -171,8 +173,8 @@ sscOf = Lens.iso to fro
     
 
 
-loadColorPicture :: FilePath -> IO ColorPicture
-loadColorPicture fn = withMagickWandGenesis $ do
+readColorPicture :: FilePath -> IO ColorPicture
+readColorPicture fn = withMagickWandGenesis $ do
   (_,img) <- magickWand
   readImage img $ decodeString fn
   w <- getImageWidth img
@@ -195,6 +197,35 @@ loadColorPicture fn = withMagickWandGenesis $ do
 
   return $ Repa.fromUnboxed (ix2 w h) pixelsF
 
+writeColorPicture :: FilePath -> ColorPicture -> IO ()
+writeColorPicture fn pict = withMagickWandGenesis $ do
+  let (Z :. w :. h) = Repa.extent pict
+  (_,pImg) <- magickWand
+  pPxl <- pixelWand
+  (_,pDraw) <- drawingWand              
+  setRed pPxl 1
+  setGreen pPxl 0.3
+  setBlue pPxl 0
+  newImage pImg w h  pPxl
+
+  forM_ [0..(h*w-1)] $ \idx -> do
+     let (y,x) = idx `divMod` w
+     let pxl = Repa.index pict (ix2 x y)
+--     getImagePixelColor pImg x y pPxl
+     
+     setRed   pPxl $ float2Double $ pxl ^. red
+     setGreen pPxl $ float2Double $ pxl ^. green
+     setBlue  pPxl $ float2Double $ pxl ^. blue
+     setAlpha pPxl $ float2Double $ pxl ^. alpha
+     setFillColor pDraw pPxl
+     
+     drawPoint pDraw (fromIntegral x) (fromIntegral y)
+  drawImage pImg pDraw
+
+  writeImage pImg (Just $ decodeString fn) 
+  return ()
+
+
 
 inputFns :: [(String,String)]
 inputFns = [ ("20120123_hmi.png","20120123_hmi_mask.png")
@@ -207,6 +238,10 @@ predictFns = ["20110809_hmi.png", "20130515_11743_hmi.png"]
 toFeatureFn :: String -> String
 toFeatureFn fn = replace ".png" ".txt" fn
 
+toProblemFn :: String -> String
+toProblemFn fn = replace ".png" ".problem" fn
+
+
 main :: IO ()
 main = do
   print myOption
@@ -217,7 +252,8 @@ main = do
   setCurrentDirectory  (outputFolder myOption)
 
   when ("feature" `elem` runMode myOption) $ do
-    mapM_ makeFeature $ inputFns ++ map (,"") predictFns
+    mapM_ makeFeature $ inputFns
+    mapM_ makeFeature $ map (\(x,_)->(x,"")) inputFns ++ map (,"") predictFns
   
   let featureFns = map (toFeatureFn . fst) $init inputFns
       trainFiles = init featureFns
@@ -233,7 +269,7 @@ main = do
     writeFile logFile2 ret
 
   when ("predict" `elem` runMode myOption) $ do
-    mapM_ makePrediction $ predictFns
+    mapM_ makePrediction $ map toProblemFn $ predictFns ++ map fst inputFns
 
 
   return ()
@@ -250,23 +286,43 @@ logFile2 = toFeatureFn "libsvm-total-learn.log"
 
 
 makePrediction :: String -> IO ()
-makePrediction fn = do
+makePrediction targetFn = do
+  let predictionFn = targetFn ++ ".predict"
   ret <- readInteractiveCommand$ printf "./libsvm/svm-predict %s %s %s" 
-    totalCatFile totalModelFile   
-  print ret
+    targetFn totalModelFile predictionFn  
+  writeFile (predictionFn++".log") ret
+  
+  predStr <- Strict.readFile predictionFn
+  let cs :: [RGBA Float]
+      cs = map ((^.Lens.from sscOf) . toEnum . read) $ words predStr 
+      
+      -- n is sqrt of the length. do not trust the floating point precision!
+      n :: Int 
+      n = last $ takeWhile (\x -> x*x<=length cs) [0..]
+  
+      predImg :: ColorPicture
+      predImg = Repa.fromList (ix2 n n) cs
+
+      predImgFn = predictionFn ++ ".png"
+  writeColorPicture predImgFn  predImg
+  return ()
+
 
 makeFeature :: (String,String) -> IO ()
 makeFeature (imageFn, maskFn) = do
-  pictSun <- loadColorPicture $ "data-shrunk/" ++ imageFn
+  pictSun <- readColorPicture $ "data-shrunk/" ++ imageFn
   let (Z :. w :. h) = Repa.extent pictSun
-      featureFn = toFeatureFn imageFn
-
+      featureFn 
+        | maskFn == "" = toProblemFn imageFn
+        | otherwise    = toFeatureFn imageFn
   classNumOf <- case maskFn of
     "" -> return $ const (-1)
     _  -> do
-      pictMask <- loadColorPicture $ "data-shrunk/" ++ maskFn
-      classedSun <- Repa.computeP $ Repa.map (fromEnum . (^. sscOf)) pictMask
-                    :: IO (Picture Int)
+      pictMask <- readColorPicture $ "data-shrunk/" ++ maskFn
+
+      classedSun :: Picture Int
+        <- Repa.computeP $ Repa.map (fromEnum . (^. sscOf)) pictMask
+
       forM_ [0..4] $ \classIdx -> do
          cnt <- Repa.foldAllP (+) (0::Int) $ Repa.map (\i -> if i==classIdx then 1 else 0) classedSun
          printf "class %d: %08d\n" classIdx cnt
@@ -278,13 +334,13 @@ makeFeature (imageFn, maskFn) = do
   maxTree <- computeQuadTree (foldr1 (zipRGBAWith max)) pictSun
 
   
-  let step :: Int
-        | maskFn == "" = 4
-        | otherwise    = 2
+  let (stride, step) :: (Int,Int)
+        | maskFn == "" = (2,4)
+        | otherwise    = (0,2)
       
 
-  featureBulk <- forM [0, step .. h-1] $ \y -> do
-    forM [0, step .. w-1] $ \x -> do
+  featureBulk <- forM [stride, stride+step .. h-1] $ \y -> do
+    forM [stride, stride+step .. w-1] $ \x -> do
       let pt = ix2 x y
           classNum = classNumOf pt
           
