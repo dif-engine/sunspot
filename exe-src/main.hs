@@ -40,6 +40,12 @@ import           System.Random
 import           Text.Printf
 
 
+readInteractiveCommand :: String -> IO String
+readInteractiveCommand cmd = do
+  (_, stdout, _, _) <- runInteractiveCommand cmd
+  hGetContents stdout
+
+
 data Option = Option { useMinMax :: Bool, patternSize :: Int}
   deriving (Eq, Show, Typeable, Data)
 
@@ -209,7 +215,8 @@ main = do
 
   _ <- system $ printf "cat %s > %s" (unwords trainFiles) trainCatFile
   _ <- system $ printf "cat %s > %s" (unwords validFiles) validCatFile
-  _ <- system $ printf "./libsvm/easy.py %s %s &> %s" trainCatFile validCatFile logFile
+  ret <- readInteractiveCommand$ printf "./libsvm/easy.py %s %s" trainCatFile validCatFile 
+  writeFile logFile ret
 
   return ()
 
