@@ -15,8 +15,8 @@ main = replicateM_ 1000 $ do
 {-
  Try the following command.
 
- ./exe-src/libsvm-test.hs > data.txt
- ./exe-src/libsvm-test.hs > data2.txt
- ./libsvm/easy.py data.txt data2.txt
+ ./exe-src/libsvm-test.hs > testdata.txt
+ ./exe-src/libsvm-test.hs > testdata2.txt
+ ./libsvm/easy.py testdata.txt  testdata2.txt
 
 -}

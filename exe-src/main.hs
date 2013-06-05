@@ -8,6 +8,8 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TupleSections #-}
+
 module Main where
 
 import           Control.Applicative
@@ -32,6 +34,7 @@ import           GHC.Float (double2Float)
 import           Graphics.ImageMagick.MagickWand
 import           System.Console.CmdArgs.Implicit ((&=))
 import qualified System.Console.CmdArgs.Implicit as Cmd
+import           System.Directory(setCurrentDirectory)
 import           System.Environment
 import           System.IO
 import           System.IO.Unsafe
@@ -46,11 +49,14 @@ readInteractiveCommand cmd = do
   hGetContents stdout
 
 
-data Option = Option { useMinMax :: Bool, patternSize :: Int}
+data Option = Option { useMinMax :: Bool, patternSize :: Int, runMode :: [String]}
   deriving (Eq, Show, Typeable, Data)
 
 optionParser :: Option
-optionParser = Option Cmd.def Cmd.def 
+optionParser = Option 
+  { useMinMax = Cmd.def
+  , patternSize = Cmd.def 
+  , runMode = Cmd.def &= Cmd.args &= Cmd.typ "feature|learn|predict"}
 
 outputFolder :: Option -> String
 outputFolder Option{..} = printf "result-%d-%d" (if useMinMax then 1 else 0::Int) patternSize
@@ -195,60 +201,80 @@ inputFns = [ ("20120123_hmi.png","20120123_hmi_mask.png")
            , ("20120307_hmi.png","20120307_hmi_mask.png")
            , ("20130515_11745_hmi.png","20130515_11745_hmi_mask.png")]
 
+predictFns :: [String]
+predictFns = ["20110809_hmi.png", "20130515_11743_hmi.png"]
+
 toFeatureFn :: String -> String
-toFeatureFn fn = outputFolder myOption ++ "/" ++ replace ".png" ".txt" fn
+toFeatureFn fn = replace ".png" ".txt" fn
 
 main :: IO ()
 main = do
   print myOption
   _ <- system $ "mkdir -p " ++ outputFolder myOption
   _ <- system $ printf "ln -s $PWD/libsvm %s/ "  (outputFolder myOption)
-  mapM_ process inputFns
+  _ <- system $ printf "ln -s $PWD/data-shrunk %s/ "  (outputFolder myOption)
+
+  setCurrentDirectory  (outputFolder myOption)
+
+  when ("feature" `elem` runMode myOption) $ do
+    mapM_ makeFeature $ inputFns ++ map (,"") predictFns
   
   let featureFns = map (toFeatureFn . fst) $init inputFns
       trainFiles = init featureFns
       validFiles = [last featureFns]
 
+      trainCatFile, validCatFile :: String
       trainCatFile  = "train.txt"
       validCatFile  = "validate.txt"
   
       logFile = toFeatureFn "libsvm-easy.log"
 
-  _ <- system $ printf "cat %s > %s" (unwords trainFiles) (toFeatureFn trainCatFile)
-  _ <- system $ printf "cat %s > %s" (unwords validFiles) (toFeatureFn validCatFile)
-  ret <- readInteractiveCommand$ printf "cd %s; ./libsvm/easy.py %s %s" 
-         (outputFolder myOption) trainCatFile validCatFile 
-  writeFile logFile ret
+  when ("learn" `elem` runMode myOption) $ do
+    _ <- system $ printf "cat %s > %s" (unwords trainFiles) trainCatFile
+    _ <- system $ printf "cat %s > %s" (unwords validFiles) validCatFile
+    ret <- readInteractiveCommand$ printf "./libsvm/easy.py %s %s" trainCatFile validCatFile 
+    writeFile logFile ret
+
+  when ("predict" `elem` runMode myOption) $ do
+    mapM_ makeFeature $ inputFns ++ map (,"") predictFns
+
 
   return ()
 
-process :: (String,String) -> IO ()
-process (imageFn, maskFn) = do
+makeFeature :: (String,String) -> IO ()
+makeFeature (imageFn, maskFn) = do
   pictSun <- loadColorPicture $ "data-shrunk/" ++ imageFn
   let (Z :. w :. h) = Repa.extent pictSun
       featureFn = toFeatureFn imageFn
 
-  pictMask <- loadColorPicture $ "data-shrunk/" ++ maskFn
+  classNumOf <- case maskFn of
+    "" -> return $ const (-1)
+    _  -> do
+      pictMask <- loadColorPicture $ "data-shrunk/" ++ maskFn
+      classedSun <- Repa.computeP $ Repa.map (fromEnum . (^. sscOf)) pictMask
+                    :: IO (Picture Int)
+      forM_ [0..4] $ \classIdx -> do
+         cnt <- Repa.foldAllP (+) (0::Int) $ Repa.map (\i -> if i==classIdx then 1 else 0) classedSun
+         printf "class %d: %08d\n" classIdx cnt
 
-
-
-  classedSun <- Repa.computeP $ Repa.map (fromEnum . (^. sscOf)) pictMask
-                :: IO (Picture Int)
-
-  forM_ [0..4] $ \classIdx -> do
-    cnt <- Repa.foldAllP (+) (0::Int) $ Repa.map (\i -> if i==classIdx then 1 else 0) classedSun
-    printf "class %d: %08d\n" classIdx cnt
+      return $ Repa.index classedSun
 
   avgTree <- computeQuadTree (fmap (/4) . sum) pictSun
   minTree <- computeQuadTree (foldr1 (zipRGBAWith min)) pictSun
   maxTree <- computeQuadTree (foldr1 (zipRGBAWith max)) pictSun
 
   
-  featureBulk <- forM [0, 2 .. h-1] $ \y -> do
-    forM [0, 2 .. w-1] $ \x -> do
+  let step :: Int
+        | maskFn == "" = 4
+        | otherwise    = 2
+      
+
+  featureBulk <- forM [0, step .. h-1] $ \y -> do
+    forM [0, step .. w-1] $ \x -> do
       let pt = ix2 x y
-          classNum = Repa.index classedSun pt
+          classNum = classNumOf pt
           
+
           useTree :: [ColorPicture] -> [Float]
           useTree = map (^.red) . traverseQuadTree pt 
 
