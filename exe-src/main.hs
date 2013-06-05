@@ -223,23 +223,37 @@ main = do
       trainFiles = init featureFns
       validFiles = [last featureFns]
 
-      trainCatFile, validCatFile :: String
-      trainCatFile  = "train.txt"
-      validCatFile  = "validate.txt"
-  
-      logFile = toFeatureFn "libsvm-easy.log"
-
   when ("learn" `elem` runMode myOption) $ do
     _ <- system $ printf "cat %s > %s" (unwords trainFiles) trainCatFile
     _ <- system $ printf "cat %s > %s" (unwords validFiles) validCatFile
+    _ <- system $ printf "cat %s > %s" (unwords $ trainFiles ++ validFiles) totalCatFile
     ret <- readInteractiveCommand$ printf "./libsvm/easy.py %s %s" trainCatFile validCatFile 
-    writeFile logFile ret
+    writeFile logFile1 ret
+    ret <- readInteractiveCommand$ printf "./libsvm/easy.py %s" totalCatFile
+    writeFile logFile2 ret
 
   when ("predict" `elem` runMode myOption) $ do
-    mapM_ makeFeature $ inputFns ++ map (,"") predictFns
+    mapM_ makePrediction $ predictFns
 
 
   return ()
+
+trainCatFile, validCatFile, totalCatFile, totalModelFile :: String
+trainCatFile  = "train.txt"
+validCatFile  = "validate.txt"
+totalCatFile  = "total.txt"  
+totalModelFile = "total.txt.model"  
+
+logFile1, logFile2 :: String
+logFile1 = toFeatureFn "libsvm-cross-validate.log"
+logFile2 = toFeatureFn "libsvm-total-learn.log"
+
+
+makePrediction :: String -> IO ()
+makePrediction fn = do
+  ret <- readInteractiveCommand$ printf "./libsvm/svm-predict %s %s %s" 
+    totalCatFile totalModelFile   
+  print ret
 
 makeFeature :: (String,String) -> IO ()
 makeFeature (imageFn, maskFn) = do
