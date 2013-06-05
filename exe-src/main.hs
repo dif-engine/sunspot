@@ -227,8 +227,8 @@ main = do
     _ <- system $ printf "cat %s > %s" (unwords trainFiles) trainCatFile
     _ <- system $ printf "cat %s > %s" (unwords validFiles) validCatFile
     _ <- system $ printf "cat %s > %s" (unwords $ trainFiles ++ validFiles) totalCatFile
-    ret <- readInteractiveCommand$ printf "./libsvm/easy.py %s %s" trainCatFile validCatFile 
-    writeFile logFile1 ret
+--     ret <- readInteractiveCommand$ printf "./libsvm/easy.py %s %s" trainCatFile validCatFile 
+--     writeFile logFile1 ret
     ret <- readInteractiveCommand$ printf "./libsvm/easy.py %s" totalCatFile
     writeFile logFile2 ret
 
